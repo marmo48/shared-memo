@@ -3,331 +3,69 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>共有メモ帳</title>
-  <link href="https://fonts.googleapis.com/css2?family=Kaisei+Tokumin:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <title>共有グリッド</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg: #0e0e0e;
-      --surface: #181818;
-      --border: #2a2a2a;
-      --accent: #c8f060;
-      --accent-dim: #8aab30;
-      --text: #e8e8e8;
-      --text-muted: #666;
-      --danger: #ff6b6b;
-    }
-
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      min-height: 100vh;
+      background: #fff;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 2rem;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* 背景グリッド */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        linear-gradient(var(--border) 1px, transparent 1px),
-        linear-gradient(90deg, var(--border) 1px, transparent 1px);
-      background-size: 40px 40px;
-      opacity: 0.4;
-      z-index: 0;
-    }
-
-    .container {
-      position: relative;
-      z-index: 1;
-      width: 100%;
-      max-width: 560px;
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-
-    /* ヘッダー */
-    header {
-      display: flex;
-      align-items: baseline;
-      gap: 1rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 1rem;
-    }
-
-    header h1 {
-      font-family: 'Kaisei Tokumin', serif;
-      font-size: 1.6rem;
-      color: var(--accent);
-      letter-spacing: 0.02em;
-    }
-
-    header .subtitle {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    /* カード共通 */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .card-label {
-      font-size: 0.65rem;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    /* 現在の共有文字列 */
-    .shared-text {
-      font-size: 1rem;
-      line-height: 1.7;
-      color: var(--text);
-      min-height: 3.5rem;
-      word-break: break-all;
-      white-space: pre-wrap;
-      transition: opacity 0.3s;
-    }
-
-    .shared-text.loading {
-      opacity: 0.3;
-    }
-
-    .shared-text.empty {
-      color: var(--text-muted);
-      font-style: italic;
-    }
-
-    /* 更新ボタン */
-    .btn-refresh {
-      align-self: flex-start;
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
+      min-height: 100vh;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
-      padding: 0.4rem 0.9rem;
-      cursor: pointer;
-      border-radius: 2px;
-      transition: all 0.2s;
+      gap: 2rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(8, 48px);
+      grid-template-rows: repeat(8, 48px);
+      border-left: 1px solid #e0e0e0;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .cell {
+      width: 48px;
+      height: 48px;
+      border-right: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      justify-content: center;
+      font-size: 1.1rem;
+      color: #222;
     }
 
-    .btn-refresh:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .btn-refresh .icon {
-      display: inline-block;
-      transition: transform 0.5s;
-    }
-
-    .btn-refresh.spinning .icon {
-      transform: rotate(360deg);
-    }
-
-    /* 最終更新時刻 */
-    .last-updated {
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      margin-left: auto;
-    }
-
-    .meta-row {
-      display: flex;
-      align-items: center;
-    }
-
-    /* 入力エリア */
-    textarea {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.9rem;
-      line-height: 1.6;
-      padding: 0.75rem;
-      resize: none;
-      height: 100px;
-      width: 100%;
+    input {
+      border: none;
+      border-bottom: 1.5px solid #ccc;
       outline: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      padding: 0.4rem 0.2rem;
+      width: 384px;
+      color: #222;
+      background: transparent;
       transition: border-color 0.2s;
     }
 
-    textarea:focus {
-      border-color: var(--accent-dim);
+    input:focus {
+      border-bottom-color: #888;
     }
 
-    textarea::placeholder {
-      color: var(--text-muted);
-    }
-
-    /* 文字数カウンター */
-    .count-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .char-count {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      transition: color 0.2s;
-    }
-
-    .char-count.over {
-      color: var(--danger);
-    }
-
-    .char-count.near {
-      color: #f0a060;
-    }
-
-    /* アップロードボタン */
-    .btn-upload {
-      background: var(--accent);
-      border: none;
-      border-radius: 2px;
-      color: #0e0e0e;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      padding: 0.55rem 1.25rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      text-transform: uppercase;
-    }
-
-    .btn-upload:hover:not(:disabled) {
-      background: #d8ff70;
-      transform: translateY(-1px);
-    }
-
-    .btn-upload:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    /* トースト通知 */
-    .toast {
-      position: fixed;
-      bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%) translateY(20px);
-      background: var(--surface);
-      border: 1px solid var(--accent);
-      color: var(--accent);
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
-      padding: 0.6rem 1.2rem;
-      border-radius: 2px;
-      opacity: 0;
-      transition: all 0.3s;
-      pointer-events: none;
-      z-index: 100;
-    }
-
-    .toast.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    .toast.error {
-      border-color: var(--danger);
-      color: var(--danger);
-    }
-
-    /* ライブバッジ */
-    .live-badge {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.65rem;
-      color: var(--accent);
-      letter-spacing: 0.1em;
-    }
-
-    .live-dot {
-      width: 6px;
-      height: 6px;
-      background: var(--accent);
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.8); }
+    input::placeholder {
+      color: #ccc;
     }
   </style>
 </head>
 <body>
 
-<div class="container">
-  <header>
-    <h1>共有メモ帳</h1>
-    <span class="subtitle">100文字の共有スペース</span>
-  </header>
+  <div class="grid" id="grid"></div>
+  <input type="text" id="inputText" placeholder="入力してEnterで送信（64文字まで）" maxlength="64" />
 
-  <!-- 現在の共有テキスト -->
-  <div class="card">
-    <div class="card-label">現在の共有文字列</div>
-    <div class="shared-text empty" id="sharedText">読み込み中...</div>
-    <div class="meta-row">
-      <button class="btn-refresh" id="refreshBtn" onclick="fetchText()">
-        <span class="icon">↻</span> 最新に更新
-      </button>
-      <span class="last-updated" id="lastUpdated">—</span>
-      <span style="margin-left:0.75rem" class="live-badge">
-        <span class="live-dot"></span>LIVE
-      </span>
-    </div>
-  </div>
-
-  <!-- 入力・アップロード -->
-  <div class="card">
-    <div class="card-label">新しい文字列をアップロード</div>
-    <textarea
-      id="inputText"
-      placeholder="ここに100文字以内で入力..."
-      maxlength="100"
-      oninput="updateCount()"
-    ></textarea>
-    <div class="count-row">
-      <span class="char-count" id="charCount">0 / 100</span>
-      <button class="btn-upload" id="uploadBtn" onclick="uploadText()">アップロード</button>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-
-<!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -344,73 +82,35 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
-  const textRef = ref(db, 'sharedText');
+  const gridRef = ref(db, 'sharedGrid');
 
-  // リアルタイム監視（誰かが書き換えたら自動更新）
-  onValue(textRef, (snapshot) => {
-    const data = snapshot.val();
-    const el = document.getElementById('sharedText');
-    if (data && data.text) {
-      el.textContent = data.text;
-      el.classList.remove('empty', 'loading');
-      if (data.updatedAt) {
-        const d = new Date(data.updatedAt);
-        document.getElementById('lastUpdated').textContent =
-          d.toLocaleTimeString('ja-JP');
-      }
-    } else {
-      el.textContent = 'まだ何も書かれていません';
-      el.classList.add('empty');
+  function renderGrid(flat) {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 64; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.textContent = flat[i] || '';
+      grid.appendChild(cell);
     }
+  }
+
+  onValue(gridRef, (snapshot) => {
+    const data = snapshot.val();
+    const flat = data && data.flat ? data.flat : Array(64).fill('');
+    renderGrid(flat);
   });
 
-  // テキストをアップロード
-  window.uploadText = async function() {
-    const text = document.getElementById('inputText').value.trim();
-    if (!text) { showToast('文字を入力してください', true); return; }
-    if (text.length > 100) { showToast('100文字以内にしてください', true); return; }
-
-    const btn = document.getElementById('uploadBtn');
-    btn.disabled = true;
-    btn.textContent = '送信中...';
-
-    try {
-      await set(textRef, { text, updatedAt: Date.now() });
-      document.getElementById('inputText').value = '';
-      document.getElementById('charCount').textContent = '0 / 100';
-      showToast('アップロードしました！');
-    } catch (e) {
-      showToast('エラーが発生しました', true);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'アップロード';
+  document.getElementById('inputText').addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const text = e.target.value;
+    const flat = Array(64).fill('');
+    for (let i = 0; i < Math.min(text.length, 64); i++) {
+      flat[i] = text[i];
     }
-  };
-
-  // 手動更新ボタン（リアルタイム監視があるので基本不要だが念のため）
-  window.fetchText = function() {
-    const btn = document.getElementById('refreshBtn');
-    btn.classList.add('spinning');
-    setTimeout(() => btn.classList.remove('spinning'), 500);
-    showToast('リアルタイム同期中です');
-  };
-</script>
-
-<script>
-  function updateCount() {
-    const len = document.getElementById('inputText').value.length;
-    const el = document.getElementById('charCount');
-    el.textContent = `${len} / 100`;
-    el.classList.toggle('over', len > 100);
-    el.classList.toggle('near', len >= 80 && len <= 100);
-  }
-
-  function showToast(msg, isError = false) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast show' + (isError ? ' error' : '');
-    setTimeout(() => { t.className = 'toast'; }, 2500);
-  }
+    await set(gridRef, { flat });
+    e.target.value = '';
+  });
 </script>
 
 </body>
