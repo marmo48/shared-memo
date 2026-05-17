@@ -25,18 +25,18 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(20, 28px);
-      grid-template-rows: repeat(20, 28px);
-      border-left: 1px solid #f1f1f1;
-      border-top: 1px solid #f1f1f1;
+      grid-template-columns: repeat(20, 24px);
+      grid-template-rows: repeat(20, 24px);
+      border-left: 1px solid #f8f8f8;
+      border-top: 1px solid #f8f8f8;
       cursor: text;
     }
 
     .cell {
-      width: 28px;
-      height: 28px;
-      border-right: 1px solid #e0e0e0;
-      border-bottom: 1px solid #e0e0e0;
+      width: 24x;
+      height: 24px;
+      border-right: 1px solid #f8f8f8;
+      border-bottom: 1px solid #f8f8f8;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -130,7 +130,7 @@
   const db = getDatabase(app);
 
   const COLS = 20, ROWS = 20, SIZE = COLS * ROWS;
-  const CELL_SIZE = 28; // px（CSSと合わせる）
+  const CELL_SIZE = 24; // px（CSSと合わせる）
   const SCALE_MIN = 0.4, SCALE_MAX = 3.0, SCALE_STEP = 0.1;
 
   let serverFlat = Array(SIZE).fill('');
@@ -175,7 +175,7 @@
     const cell = cells[activeCellIdx];
     const rect = cell.getBoundingClientRect();
     // マスの右端・上端に配置
-    imeEl.style.left = (rect.right)*2 + 'px';
+    imeEl.style.left = (rect.right) + 'px' + 10;
     imeEl.style.top  = (rect.top) + 'px';
   }
 
