@@ -16,6 +16,7 @@
       justify-content: center;
       min-height: 100vh;
       font-family: 'JetBrains Mono', monospace;
+      gap: 2rem;
       user-select: none;
     }
 
@@ -46,7 +47,6 @@
       background: #f0f0f0;
     }
 
-    /* カーソル（点滅） */
     .cell.selected::after {
       content: '';
       position: absolute;
@@ -63,11 +63,39 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0; }
     }
+
+    input {
+      border: none;
+      border-bottom: 1.5px solid #ccc;
+      outline: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      padding: 0.4rem 0.2rem;
+      width: 384px;
+      color: #222;
+      background: transparent;
+      transition: border-color 0.2s;
+      user-select: text;
+    }
+
+    input:focus {
+      border-bottom-color: #888;
+    }
+
+    input::placeholder {
+      color: #ccc;
+    }
+
+    input:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
 
   <div class="grid" id="grid"></div>
+  <input type="text" id="inputText" placeholder="マスを選択して入力…" disabled />
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -86,12 +114,13 @@
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
 
-  const ROWS = 8, COLS = 8;
+  const COLS = 8;
   let flat = Array(64).fill('');
-  let cursor = null; // null = 未選択
+  let cursor = null;
 
   // --- DOM構築 ---
   const gridEl = document.getElementById('grid');
+  const inputEl = document.getElementById('inputText');
   const cells = [];
 
   for (let i = 0; i < 64; i++) {
@@ -104,6 +133,9 @@
 
   function setCursor(i) {
     cursor = i;
+    inputEl.disabled = false;
+    inputEl.value = '';
+    inputEl.focus();
     render();
   }
 
@@ -114,57 +146,50 @@
     }
   }
 
-  // --- Firebaseリアルタイム同期 ---
+  // --- Firebase リアルタイム同期 ---
   const flatRef = ref(db, 'sharedGrid2/flat');
 
   onValue(flatRef, (snapshot) => {
     const data = snapshot.val();
-    if (data) {
-      // Firebaseは配列をオブジェクトで返すことがあるので変換
-      for (let i = 0; i < 64; i++) {
-        flat[i] = data[i] !== undefined ? data[i] : '';
-      }
-    } else {
-      flat = Array(64).fill('');
+    for (let i = 0; i < 64; i++) {
+      flat[i] = data && data[i] !== undefined ? data[i] : '';
     }
     render();
   });
 
-  // 1マスだけ更新
-  async function updateCell(i, char) {
-    flat[i] = char;
-    await set(ref(db, `sharedGrid2/flat/${i}`), char);
+  // 複数マスをまとめて更新
+  async function updateCells(startIndex, text) {
+    const updates = {};
+    for (let j = 0; j < text.length; j++) {
+      const idx = startIndex + j;
+      if (idx >= 64) break;
+      flat[idx] = text[j];
+      updates[`sharedGrid2/flat/${idx}`] = text[j];
+    }
+    // まとめて書き込み
+    const { update } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+    await update(ref(db), updates);
+    // カーソルを入力した文字数分進める
+    const newCursor = Math.min(startIndex + text.length, 63);
+    setCursor(newCursor);
   }
 
-  // --- キー入力 ---
-  document.addEventListener('keydown', async (e) => {
-    if (cursor === null) return;
-
-    if (e.key === 'Backspace') {
-      e.preventDefault();
-      await updateCell(cursor, '');
-      if (cursor > 0) setCursor(cursor - 1);
-
-    } else if (e.key.length === 1) {
-      // 1文字の通常入力
-      await updateCell(cursor, e.key);
-      if (cursor < 63) setCursor(cursor + 1);
-
-    } else if (e.key === 'ArrowRight') {
-      if (cursor < 63) setCursor(cursor + 1);
-    } else if (e.key === 'ArrowLeft') {
-      if (cursor > 0) setCursor(cursor - 1);
-    } else if (e.key === 'ArrowDown') {
-      if (cursor + COLS < 64) setCursor(cursor + COLS);
-    } else if (e.key === 'ArrowUp') {
-      if (cursor - COLS >= 0) setCursor(cursor - COLS);
-    }
+  // --- Enter で送信 ---
+  inputEl.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return; // IME変換中は無視
+    e.preventDefault();
+    const text = inputEl.value;
+    if (!text || cursor === null) return;
+    await updateCells(cursor, text);
+    inputEl.value = '';
   });
 
   // グリッド外クリックでカーソル解除
   document.addEventListener('click', (e) => {
-    if (!gridEl.contains(e.target)) {
+    if (!gridEl.contains(e.target) && e.target !== inputEl) {
       cursor = null;
+      inputEl.disabled = true;
+      inputEl.value = '';
       render();
     }
   });
