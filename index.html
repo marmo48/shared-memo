@@ -20,27 +20,27 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(8, 48px);
-      grid-template-rows: repeat(8, 48px);
+      grid-template-columns: repeat(8, 32px);
+      grid-template-rows: repeat(8, 32px);
       border-left: 1px solid #e0e0e0;
       border-top: 1px solid #e0e0e0;
       cursor: text;
     }
 
     .cell {
-      width: 48px;
-      height: 48px;
+      width: 32px;
+      height: 32px;
       border-right: 1px solid #e0e0e0;
       border-bottom: 1px solid #e0e0e0;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.1rem;
+      font-size: 1rem;
       color: #222;
       position: relative;
     }
 
-    /* カーソルのあるマス */
+    /* カーソルのあるマス（待機中） */
     .cell.cursor {
       background: #f0f0f0;
     }
@@ -49,25 +49,36 @@
       content: '';
       position: absolute;
       left: 50%;
-      bottom: 7px;
+      bottom: 5px;
       transform: translateX(-50%);
-      width: 18px;
+      width: 14px;
       height: 1.5px;
       background: #444;
       animation: blink 1s step-end infinite;
     }
 
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0; }
+    /* 仮入力中：カーソル位置（最後の文字のマス） */
+    .cell.cursor-pending {
+      background: #f0f0f0;
     }
 
-    /* 擬似入力中のマス（未確定） */
+    .cell.cursor-pending::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      bottom: 5px;
+      transform: translateX(-50%);
+      width: 14px;
+      height: 1.5px;
+      background: #444;
+      animation: blink 1s step-end infinite;
+    }
+
+    /* 仮入力中の文字（未確定） */
     .cell.pending {
       color: #aaa;
     }
 
-    /* 隠し input（IME受け取り用） */
     #ime {
       position: fixed;
       opacity: 0;
@@ -86,7 +97,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
-    getDatabase, ref, set, onValue, update
+    getDatabase, ref, onValue, update
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   const firebaseConfig = {
@@ -103,11 +114,10 @@
   const db = getDatabase(app);
 
   const COLS = 8, SIZE = 64;
-  let serverFlat = Array(SIZE).fill(''); // サーバーの現在値
-  let cursor = null;   // 選択中のマスindex
-  let pending = '';    // 未確定の入力文字列
+  let serverFlat = Array(SIZE).fill('');
+  let cursor = null;
+  let pending = '';
 
-  // --- DOM ---
   const gridEl = document.getElementById('grid');
   const imeEl  = document.getElementById('ime');
   const cells  = [];
@@ -115,14 +125,11 @@
   for (let i = 0; i < SIZE; i++) {
     const cell = document.createElement('div');
     cell.className = 'cell';
-    cell.addEventListener('click', () => {
-      commitAndThen(() => setCursor(i));
-    });
+    cell.addEventListener('click', () => commitAndThen(() => setCursor(i)));
     gridEl.appendChild(cell);
     cells.push(cell);
   }
 
-  // カーソルをセット
   function setCursor(i) {
     cursor = i;
     pending = '';
@@ -131,31 +138,37 @@
     render();
   }
 
-  // 画面を描画
   function render() {
-    const pendingChars = [...pending]; // 文字単位で分割（絵文字等も考慮）
+    const pendingChars = [...pending];
+    const pendingLen = pendingChars.length;
+
+    // 仮入力中のカーソル位置 = cursor + pendingLen - 1（最後の文字のマス）
+    // pendingがなければ cursor がカーソル
+    const cursorCell = (cursor !== null && pendingLen > 0)
+      ? cursor + pendingLen - 1
+      : cursor;
 
     for (let i = 0; i < SIZE; i++) {
       const cell = cells[i];
-      const isCursor = (i === cursor && pending === '');
       const pendingIdx = (cursor !== null) ? i - cursor : -1;
-      const isPending = cursor !== null && pendingIdx >= 0 && pendingIdx < pendingChars.length;
+      const isPending = cursor !== null && pendingIdx >= 0 && pendingIdx < pendingLen;
+      const isCursorCell = (i === cursorCell && cursor !== null);
 
-      cell.className = 'cell' +
-        (isCursor ? ' cursor' : '') +
-        (isPending ? ' pending' : '');
-
-      if (isPending) {
-        cell.textContent = pendingChars[pendingIdx];
-      } else {
-        cell.textContent = serverFlat[i] || '';
+      let cls = 'cell';
+      if (isPending && isCursorCell) {
+        cls += ' pending cursor-pending'; // 最後の仮入力マス＝カーソル
+      } else if (isPending) {
+        cls += ' pending';
+      } else if (isCursorCell) {
+        cls += ' cursor'; // 待機中カーソル
       }
+      cell.className = cls;
+      cell.textContent = isPending ? pendingChars[pendingIdx] : (serverFlat[i] || '');
     }
   }
 
-  // --- Firebase ---
+  // Firebase
   const flatRef = ref(db, 'sharedGrid3/flat');
-
   onValue(flatRef, (snapshot) => {
     const data = snapshot.val();
     for (let i = 0; i < SIZE; i++) {
@@ -164,7 +177,6 @@
     render();
   });
 
-  // pending文字列をサーバーに確定送信
   async function commitPending() {
     if (cursor === null || pending === '') return;
     const chars = [...pending];
@@ -176,49 +188,32 @@
       updates[`sharedGrid3/flat/${idx}`] = chars[j];
     }
     await update(ref(db), updates);
-    // カーソルを進める
     cursor = Math.min(cursor + chars.length, SIZE - 1);
     pending = '';
     imeEl.value = '';
   }
 
-  // 確定してからコールバック実行
   async function commitAndThen(fn) {
     await commitPending();
     if (fn) fn();
   }
 
-  // --- IME input イベント（未確定文字の擬似表示） ---
+  // 仮入力の擬似表示
   imeEl.addEventListener('input', () => {
     if (cursor === null) return;
     pending = imeEl.value;
     render();
   });
 
-  // --- キーイベント ---
   imeEl.addEventListener('keydown', async (e) => {
     if (cursor === null) return;
 
-    // IME変換中（isComposing）はEnter以外は通常通り処理させる
-    // ただしEnterはIMEの確定なので無視
-    if (e.isComposing) return;
+    if (e.isComposing) return; // IME変換中はすべて無視
 
     if (e.key === 'Enter') {
       e.preventDefault();
       await commitPending();
       render();
-
-    } else if (e.key === 'Backspace') {
-      e.preventDefault();
-      await commitAndThen(() => {
-        // Backspace本来の動作：1マス削除して左へ
-        if (cursor > 0) {
-          cursor--;
-          serverFlat[cursor] = '';
-          update(ref(db), { [`sharedGrid3/flat/${cursor}`]: '' });
-        }
-        render();
-      });
 
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
@@ -248,8 +243,20 @@
         render();
       });
 
+    } else if (e.key === 'Backspace') {
+      // Backspaceはブラウザに任せる（IME入力の修正に使う）
+      // pendingがない場合のみ：1マス削除して左へ
+      if (pending === '') {
+        e.preventDefault();
+        if (cursor > 0) {
+          cursor--;
+          serverFlat[cursor] = '';
+          update(ref(db), { [`sharedGrid3/flat/${cursor}`]: '' });
+          render();
+        }
+      }
+
     } else if (e.key === 'Escape') {
-      // 未確定を破棄してカーソル解除
       pending = '';
       imeEl.value = '';
       cursor = null;
@@ -258,7 +265,6 @@
     }
   });
 
-  // グリッド外クリックで確定＆カーソル解除
   document.addEventListener('click', async (e) => {
     if (!gridEl.contains(e.target)) {
       await commitPending();
@@ -267,7 +273,6 @@
     }
   });
 
-  // グリッドをクリックしたらIMEにフォーカス
   document.addEventListener('click', () => {
     if (cursor !== null) imeEl.focus();
   });
