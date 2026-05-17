@@ -16,7 +16,7 @@
       justify-content: center;
       min-height: 100vh;
       font-family: 'JetBrains Mono', monospace;
-      gap: 2rem;
+      user-select: none;
     }
 
     .grid {
@@ -25,6 +25,7 @@
       grid-template-rows: repeat(8, 48px);
       border-left: 1px solid #e0e0e0;
       border-top: 1px solid #e0e0e0;
+      cursor: pointer;
     }
 
     .cell {
@@ -37,34 +38,36 @@
       justify-content: center;
       font-size: 1.1rem;
       color: #222;
+      position: relative;
+      transition: background 0.1s;
     }
 
-    input {
-      border: none;
-      border-bottom: 1.5px solid #ccc;
-      outline: none;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1rem;
-      padding: 0.4rem 0.2rem;
-      width: 384px;
-      color: #222;
-      background: transparent;
-      transition: border-color 0.2s;
+    .cell.selected {
+      background: #f0f0f0;
     }
 
-    input:focus {
-      border-bottom-color: #888;
+    /* カーソル（点滅） */
+    .cell.selected::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      bottom: 8px;
+      transform: translateX(-50%);
+      width: 18px;
+      height: 1.5px;
+      background: #444;
+      animation: blink 1s step-end infinite;
     }
 
-    input::placeholder {
-      color: #ccc;
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
     }
   </style>
 </head>
 <body>
 
   <div class="grid" id="grid"></div>
-  <input type="text" id="inputText" placeholder="入力してEnterで送信（64文字まで）" maxlength="64" />
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -82,34 +85,88 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
-  const gridRef = ref(db, 'sharedGrid');
 
-  function renderGrid(flat) {
-    const grid = document.getElementById('grid');
-    grid.innerHTML = '';
+  const ROWS = 8, COLS = 8;
+  let flat = Array(64).fill('');
+  let cursor = null; // null = 未選択
+
+  // --- DOM構築 ---
+  const gridEl = document.getElementById('grid');
+  const cells = [];
+
+  for (let i = 0; i < 64; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.addEventListener('click', () => setCursor(i));
+    gridEl.appendChild(cell);
+    cells.push(cell);
+  }
+
+  function setCursor(i) {
+    cursor = i;
+    render();
+  }
+
+  function render() {
     for (let i = 0; i < 64; i++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.textContent = flat[i] || '';
-      grid.appendChild(cell);
+      cells[i].textContent = flat[i] || '';
+      cells[i].classList.toggle('selected', i === cursor);
     }
   }
 
-  onValue(gridRef, (snapshot) => {
+  // --- Firebaseリアルタイム同期 ---
+  const flatRef = ref(db, 'sharedGrid2/flat');
+
+  onValue(flatRef, (snapshot) => {
     const data = snapshot.val();
-    const flat = data && data.flat ? data.flat : Array(64).fill('');
-    renderGrid(flat);
+    if (data) {
+      // Firebaseは配列をオブジェクトで返すことがあるので変換
+      for (let i = 0; i < 64; i++) {
+        flat[i] = data[i] !== undefined ? data[i] : '';
+      }
+    } else {
+      flat = Array(64).fill('');
+    }
+    render();
   });
 
-  document.getElementById('inputText').addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter') return;
-    const text = e.target.value;
-    const flat = Array(64).fill('');
-    for (let i = 0; i < Math.min(text.length, 64); i++) {
-      flat[i] = text[i];
+  // 1マスだけ更新
+  async function updateCell(i, char) {
+    flat[i] = char;
+    await set(ref(db, `sharedGrid2/flat/${i}`), char);
+  }
+
+  // --- キー入力 ---
+  document.addEventListener('keydown', async (e) => {
+    if (cursor === null) return;
+
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      await updateCell(cursor, '');
+      if (cursor > 0) setCursor(cursor - 1);
+
+    } else if (e.key.length === 1) {
+      // 1文字の通常入力
+      await updateCell(cursor, e.key);
+      if (cursor < 63) setCursor(cursor + 1);
+
+    } else if (e.key === 'ArrowRight') {
+      if (cursor < 63) setCursor(cursor + 1);
+    } else if (e.key === 'ArrowLeft') {
+      if (cursor > 0) setCursor(cursor - 1);
+    } else if (e.key === 'ArrowDown') {
+      if (cursor + COLS < 64) setCursor(cursor + COLS);
+    } else if (e.key === 'ArrowUp') {
+      if (cursor - COLS >= 0) setCursor(cursor - COLS);
     }
-    await set(gridRef, { flat });
-    e.target.value = '';
+  });
+
+  // グリッド外クリックでカーソル解除
+  document.addEventListener('click', (e) => {
+    if (!gridEl.contains(e.target)) {
+      cursor = null;
+      render();
+    }
   });
 </script>
 
