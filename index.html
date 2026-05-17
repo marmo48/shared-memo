@@ -25,22 +25,22 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(20, 24px);
-      grid-template-rows: repeat(20, 24px);
-      border-left: 1px solid #f8f8f8;
-      border-top: 1px solid #f8f8f8;
+      grid-template-columns: repeat(20, 22px);
+      grid-template-rows: repeat(20, 22px);
+      border-left: 1px solid #f4f4f4;
+      border-top: 1px solid #f4f4f4;
       cursor: text;
     }
 
     .cell {
-      width: 24x;
-      height: 24px;
-      border-right: 1px solid #f8f8f8;
-      border-bottom: 1px solid #f8f8f8;
+      width: 22px;
+      height: 22px;
+      border-right: 1px solid #f4f4f4;
+      border-bottom: 1px solid #f4f4f4;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1rem;
+      font-size: 0.85rem;
       color: #222;
       position: relative;
     }
@@ -53,9 +53,9 @@
       content: '';
       position: absolute;
       left: 50%;
-      bottom: 5px;
+      bottom: 3px;
       transform: translateX(-50%);
-      width: 14px;
+      width: 10px;
       height: 1.5px;
       background: #444;
       animation: blink 1s step-end infinite;
@@ -69,9 +69,9 @@
       content: '';
       position: absolute;
       left: 50%;
-      bottom: 5px;
+      bottom: 3px;
       transform: translateX(-50%);
-      width: 14px;
+      width: 10px;
       height: 1.5px;
       background: #444;
       animation: blink 1s step-end infinite;
@@ -86,7 +86,6 @@
       50% { opacity: 0; }
     }
 
-    /* 隠しinput：画面外に出さず、位置だけ動かす */
     #ime {
       position: fixed;
       width: 1px;
@@ -130,7 +129,6 @@
   const db = getDatabase(app);
 
   const COLS = 20, ROWS = 20, SIZE = COLS * ROWS;
-  const CELL_SIZE = 24; // px（CSSと合わせる）
   const SCALE_MIN = 0.4, SCALE_MAX = 3.0, SCALE_STEP = 0.1;
 
   let serverFlat = Array(SIZE).fill('');
@@ -138,48 +136,50 @@
   let pending = '';
   let scale = 1.0;
 
-  const gridEl   = document.getElementById('grid');
-  const wrapperEl= document.getElementById('wrapper');
-  const imeEl    = document.getElementById('ime');
-  const cells    = [];
+  // クリックで決めたカーソルの列（改行用）
+  let anchorCol = null;
 
-  // グリッド構築
+  const gridEl    = document.getElementById('grid');
+  const wrapperEl = document.getElementById('wrapper');
+  const imeEl     = document.getElementById('ime');
+  const cells     = [];
+
   for (let i = 0; i < SIZE; i++) {
     const cell = document.createElement('div');
     cell.className = 'cell';
-    cell.addEventListener('click', () => commitAndThen(() => setCursor(i)));
+    cell.addEventListener('click', () => commitAndThen(() => setCursor(i, true)));
     gridEl.appendChild(cell);
     cells.push(cell);
   }
 
-  // カーソルをセット
-  function setCursor(i) {
+  // isClick=true のときだけanchorColを更新
+  function setCursor(i, isClick = false) {
     cursor = i;
     pending = '';
     imeEl.value = '';
+    if (isClick) {
+      anchorCol = i % COLS;
+    }
     moveIme();
     imeEl.focus();
     render();
   }
 
-  // 隠しinputをカーソルマスの右に移動
+  // 隠しinputをカーソルマスの右下に配置
   function moveIme() {
     if (cursor === null) return;
     const pendingChars = [...pending];
     const pendingLen = pendingChars.length;
-    // 表示上のカーソルマス
     const activeCellIdx = pendingLen > 0
       ? Math.min(cursor + pendingLen - 1, SIZE - 1)
       : cursor;
 
     const cell = cells[activeCellIdx];
     const rect = cell.getBoundingClientRect();
-    // マスの右端・上端に配置
-    imeEl.style.left = (rect.right) + 'px' + 10;
-    imeEl.style.top  = (rect.top) + 'px';
+    imeEl.style.left = (rect.right + 4) + 'px';
+    imeEl.style.top  = (rect.bottom + 4) + 'px';
   }
 
-  // 描画
   function render() {
     const pendingChars = [...pending];
     const pendingLen = pendingChars.length;
@@ -194,13 +194,10 @@
       const isCursorCell = (i === cursorCell && cursor !== null);
 
       let cls = 'cell';
-      if (isPending && isCursorCell) {
-        cls += ' pending cursor-pending';
-      } else if (isPending) {
-        cls += ' pending';
-      } else if (isCursorCell) {
-        cls += ' cursor';
-      }
+      if (isPending && isCursorCell) cls += ' pending cursor-pending';
+      else if (isPending)            cls += ' pending';
+      else if (isCursorCell)         cls += ' cursor';
+
       cell.className = cls;
       cell.textContent = isPending ? pendingChars[pendingIdx] : (serverFlat[i] || '');
     }
@@ -239,11 +236,10 @@
     if (fn) fn();
   }
 
-  // 仮入力の擬似表示
   imeEl.addEventListener('input', () => {
     if (cursor === null) return;
     pending = imeEl.value;
-    render();
+    render(); // render内でmoveImeも呼ばれる
   });
 
   imeEl.addEventListener('keydown', async (e) => {
@@ -252,8 +248,18 @@
 
     if (e.key === 'Enter') {
       e.preventDefault();
-      await commitPending();
-      render();
+      if (pending !== '') {
+        // 入力中：確定のみ
+        await commitPending();
+        render();
+      } else {
+        // 空のEnter：改行（anchorColの列、一つ下の行へ）
+        const currentRow = Math.floor(cursor / COLS);
+        const nextRow = currentRow + 1;
+        if (nextRow < ROWS && anchorCol !== null) {
+          setCursor(nextRow * COLS + anchorCol);
+        }
+      }
 
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
@@ -284,16 +290,17 @@
       pending = '';
       imeEl.value = '';
       cursor = null;
+      anchorCol = null;
       imeEl.blur();
       render();
     }
   });
 
-  // グリッド外クリックで確定＆カーソル解除
   document.addEventListener('click', async (e) => {
     if (!gridEl.contains(e.target)) {
       await commitPending();
       cursor = null;
+      anchorCol = null;
       render();
     }
   });
@@ -302,13 +309,11 @@
     if (cursor !== null) imeEl.focus();
   });
 
-  // マウスホイールで拡大縮小
   document.addEventListener('wheel', (e) => {
     e.preventDefault();
     const delta = e.deltaY < 0 ? SCALE_STEP : -SCALE_STEP;
     scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, scale + delta));
     wrapperEl.style.transform = `scale(${scale})`;
-    // スケール変更後にimeの位置も更新
     requestAnimationFrame(() => moveIme());
   }, { passive: false });
 
