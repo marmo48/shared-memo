@@ -7,53 +7,41 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       background: #fff;
       overflow: hidden;
-      width: 100vw;
-      height: 100vh;
+      width: 100vw; height: 100vh;
       font-family: 'JetBrains Mono', monospace;
       user-select: none;
     }
-
-    #canvas {
-      position: absolute;
-      top: 0; left: 0;
-      cursor: text;
-    }
-
+    #canvas { position: absolute; top: 0; left: 0; cursor: text; }
     #ui {
-      position: fixed;
-      top: 12px;
-      left: 12px;
+      position: fixed; top: 12px; left: 12px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.65rem;
-      color: #bbb;
-      letter-spacing: 0.05em;
-      pointer-events: none;
-      z-index: 100;
+      font-size: 0.65rem; color: #bbb;
+      letter-spacing: 0.05em; pointer-events: none; z-index: 100;
     }
-
+    #color-btn {
+      position: fixed; top: 10px; right: 12px;
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #ddd;
+      cursor: pointer; z-index: 100;
+      transition: transform 0.15s;
+    }
+    #color-btn:hover { transform: scale(1.15); }
     #ime {
-      position: fixed;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      border: none;
-      outline: none;
-      background: transparent;
-      color: transparent;
-      caret-color: transparent;
-      font-size: 1rem;
-      padding: 0;
-      z-index: 9999;
+      position: fixed; width: 1px; height: 1px; opacity: 0;
+      border: none; outline: none; background: transparent;
+      color: transparent; caret-color: transparent;
+      font-size: 1rem; padding: 0; z-index: 9999;
     }
   </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div id="ui">0, 0</div>
+<div id="color-btn"></div>
 <input id="ime" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
 
 <script type="module">
@@ -75,23 +63,67 @@
 
   // ---- 定数 ----
   const GRID_W = 1000, GRID_H = 1000;
-  const CHUNK = 10; // チャンクサイズ
-  const CELL = 22;  // 1マスのpx
+  const CHUNK = 10;
+  const CELL = 22;
   const SCALE_MIN = 0.3, SCALE_MAX = 4.0, SCALE_STEP = 0.08;
+
+  // ---- カラーシステム ----
+  // colorId 0〜255: 色相64段階 × 彩度2段階 × 明度2段階
+  function colorIdToHsl(id) {
+    const hue  = (id % 64) * (360 / 64);
+    const sat  = (Math.floor(id / 64) % 2 === 0) ? 55 : 80;
+    const light= (Math.floor(id / 128) === 0)     ? 55 : 75;
+    return `hsl(${hue.toFixed(1)}, ${sat}%, ${light}%)`;
+  }
+
+  // シークレットモード判定（書き込めなければグレー）
+  function getMyColorId() {
+    try {
+      localStorage.setItem('_test', '1');
+      localStorage.removeItem('_test');
+      // 通常モード
+      let id = localStorage.getItem('myColorId');
+      if (id === null) {
+        id = Math.floor(Math.random() * 256);
+        localStorage.setItem('myColorId', String(id));
+      }
+      return parseInt(id, 10);
+    } catch (e) {
+      return null; // シークレット → グレー
+    }
+  }
+
+  let myColorId = getMyColorId();
+
+  function myColor() {
+    return myColorId === null ? '#aaa' : colorIdToHsl(myColorId);
+  }
+
+  // ボタンの色を更新
+  const colorBtn = document.getElementById('color-btn');
+  function updateColorBtn() {
+    colorBtn.style.background = myColor();
+  }
+  updateColorBtn();
+
+  // ランダムに色を変えるボタン
+  colorBtn.addEventListener('click', () => {
+    myColorId = Math.floor(Math.random() * 256);
+    try { localStorage.setItem('myColorId', String(myColorId)); } catch (e) {}
+    updateColorBtn();
+    draw();
+  });
 
   // ---- 状態 ----
   let scale = 1.0;
-  // ビューポート左上のグリッド座標（小数可）
   let viewX = Math.floor(Math.random() * (GRID_W - 40));
   let viewY = Math.floor(Math.random() * (GRID_H - 40));
-
-  let cursor = null;   // {gx, gy} グリッド座標
+  let cursor = null;
   let anchorCol = null;
   let pending = '';
 
-  // チャンクデータキャッシュ: "cx_cy" -> string[100]
+  // チャンクキャッシュ: key -> { flat: string[], colors: number[] }
   const chunkCache = {};
-  // 購読中チャンク: "cx_cy" -> unsubscribe関数
   const subscriptions = {};
 
   // ---- Canvas ----
@@ -110,38 +142,58 @@
   // ---- チャンク管理 ----
   function chunkKey(cx, cy) { return `${cx}_${cy}`; }
 
-  function getCell(gx, gy) {
-    if (gx < 0 || gy < 0 || gx >= GRID_W || gy >= GRID_H) return '';
-    const cx = Math.floor(gx / CHUNK), cy = Math.floor(gy / CHUNK);
-    const key = chunkKey(cx, cy);
-    const cache = chunkCache[key];
-    if (!cache) return '';
-    const lx = gx % CHUNK, ly = gy % CHUNK;
-    return cache[ly * CHUNK + lx] || '';
+  function ensureCache(key) {
+    if (!chunkCache[key]) {
+      chunkCache[key] = {
+        flat:   Array(CHUNK * CHUNK).fill(''),
+        colors: Array(CHUNK * CHUNK).fill(null),
+      };
+    }
   }
 
-  function setCell(gx, gy, char) {
+  function getCell(gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= GRID_W || gy >= GRID_H) return { char: '', colorId: null };
+    const key = chunkKey(Math.floor(gx / CHUNK), Math.floor(gy / CHUNK));
+    const cache = chunkCache[key];
+    if (!cache) return { char: '', colorId: null };
+    const idx = (gy % CHUNK) * CHUNK + (gx % CHUNK);
+    return { char: cache.flat[idx] || '', colorId: cache.colors[idx] };
+  }
+
+  function setCellCache(gx, gy, char, colorId) {
     if (gx < 0 || gy < 0 || gx >= GRID_W || gy >= GRID_H) return;
-    const cx = Math.floor(gx / CHUNK), cy = Math.floor(gy / CHUNK);
-    const key = chunkKey(cx, cy);
-    if (!chunkCache[key]) chunkCache[key] = Array(CHUNK * CHUNK).fill('');
-    const lx = gx % CHUNK, ly = gy % CHUNK;
-    chunkCache[key][ly * CHUNK + lx] = char;
+    const key = chunkKey(Math.floor(gx / CHUNK), Math.floor(gy / CHUNK));
+    ensureCache(key);
+    const idx = (gy % CHUNK) * CHUNK + (gx % CHUNK);
+    chunkCache[key].flat[idx]   = char;
+    chunkCache[key].colors[idx] = colorId;
   }
 
   function subscribeChunk(cx, cy) {
     const key = chunkKey(cx, cy);
     if (subscriptions[key]) return;
-    const r = ref(db, `map/chunks/${key}/flat`);
-    const unsub = onValue(r, (snap) => {
+    ensureCache(key);
+
+    const flatRef   = ref(db, `map/chunks/${key}/flat`);
+    const colorsRef = ref(db, `map/chunks/${key}/colors`);
+
+    const unsubFlat = onValue(flatRef, (snap) => {
       const data = snap.val();
-      if (!chunkCache[key]) chunkCache[key] = Array(CHUNK * CHUNK).fill('');
       for (let i = 0; i < CHUNK * CHUNK; i++) {
-        chunkCache[key][i] = data && data[i] !== undefined ? data[i] : '';
+        chunkCache[key].flat[i] = data && data[i] !== undefined ? data[i] : '';
       }
       draw();
     });
-    subscriptions[key] = () => { off(r); };
+
+    const unsubColors = onValue(colorsRef, (snap) => {
+      const data = snap.val();
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        chunkCache[key].colors[i] = data && data[i] !== undefined ? data[i] : null;
+      }
+      draw();
+    });
+
+    subscriptions[key] = () => { off(flatRef); off(colorsRef); };
   }
 
   function unsubscribeChunk(cx, cy) {
@@ -151,14 +203,12 @@
     delete subscriptions[key];
   }
 
-  // 現在画面に映っているチャンクを計算して購読を同期
   function syncSubscriptions() {
-    const cols = Math.ceil(canvas.width  / (CELL * scale)) + 2;
-    const rows = Math.ceil(canvas.height / (CELL * scale)) + 2;
+    const cellPx = CELL * scale;
     const startCX = Math.max(0, Math.floor(viewX / CHUNK) - 1);
     const startCY = Math.max(0, Math.floor(viewY / CHUNK) - 1);
-    const endCX = Math.min(Math.floor(GRID_W / CHUNK) - 1, startCX + Math.ceil(cols / CHUNK) + 2);
-    const endCY = Math.min(Math.floor(GRID_H / CHUNK) - 1, startCY + Math.ceil(rows / CHUNK) + 2);
+    const endCX = Math.min(GRID_W / CHUNK - 1, startCX + Math.ceil(canvas.width  / cellPx / CHUNK) + 2);
+    const endCY = Math.min(GRID_H / CHUNK - 1, startCY + Math.ceil(canvas.height / cellPx / CHUNK) + 2);
 
     const needed = new Set();
     for (let cy = startCY; cy <= endCY; cy++) {
@@ -168,7 +218,6 @@
         subscribeChunk(cx, cy);
       }
     }
-    // 不要なチャンクを解除
     for (const key of Object.keys(subscriptions)) {
       if (!needed.has(key)) {
         const [cx, cy] = key.split('_').map(Number);
@@ -179,12 +228,8 @@
 
   // ---- 描画 ----
   function gridToScreen(gx, gy) {
-    return {
-      sx: (gx - viewX) * CELL * scale,
-      sy: (gy - viewY) * CELL * scale,
-    };
+    return { sx: (gx - viewX) * CELL * scale, sy: (gy - viewY) * CELL * scale };
   }
-
   function screenToGrid(sx, sy) {
     return {
       gx: Math.floor(sx / (CELL * scale) + viewX),
@@ -199,59 +244,78 @@
     const cellPx = CELL * scale;
     const pendingChars = [...pending];
     const pendingLen = pendingChars.length;
-
-    // 表示範囲
-    const startGX = Math.floor(viewX);
-    const startGY = Math.floor(viewY);
-    const endGX = Math.min(GRID_W - 1, startGX + Math.ceil(w / cellPx) + 1);
-    const endGY = Math.min(GRID_H - 1, startGY + Math.ceil(h / cellPx) + 1);
-
-    // カーソルインデックス（描画用に線形化）
-    const cursorIdx = cursor ? cursor.gy * GRID_W + cursor.gx : -1;
+    const cursorLinear = cursor ? cursor.gy * GRID_W + cursor.gx : -1;
 
     ctx.font = `${Math.round(cellPx * 0.6)}px 'JetBrains Mono', monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    const startGX = Math.floor(viewX);
+    const startGY = Math.floor(viewY);
+    const endGX = Math.min(GRID_W - 1, startGX + Math.ceil(w / cellPx) + 1);
+    const endGY = Math.min(GRID_H - 1, startGY + Math.ceil(h / cellPx) + 1);
+
     for (let gy = startGY; gy <= endGY; gy++) {
       for (let gx = startGX; gx <= endGX; gx++) {
         const { sx, sy } = gridToScreen(gx, gy);
+        const linearIdx = gy * GRID_W + gx;
+        const pendingOffset = cursor ? linearIdx - cursorLinear : -1;
+        const isPending = cursor && pendingOffset >= 0 && pendingOffset < pendingLen;
+        const isCursorCell = cursor && (
+          isPending ? linearIdx === cursorLinear + pendingLen - 1 : linearIdx === cursorLinear
+        );
 
         // グリッド線
         ctx.strokeStyle = '#f4f4f4';
         ctx.lineWidth = 1;
         ctx.strokeRect(sx, sy, cellPx, cellPx);
 
-        // 仮入力判定
-        const linearIdx = gy * GRID_W + gx;
-        const pendingOffset = cursor ? linearIdx - (cursor.gy * GRID_W + cursor.gx) : -1;
-        const isPending = cursor && pendingOffset >= 0 && pendingOffset < pendingLen;
-        const isCursorCell = cursor && (
-          isPending
-            ? linearIdx === cursorIdx + pendingLen - 1
-            : linearIdx === cursorIdx
-        );
+        if (isPending) {
+          // 仮入力：自分の色で薄く背景
+          ctx.fillStyle = myColor();
+          ctx.globalAlpha = 0.15;
+          ctx.fillRect(sx, sy, cellPx, cellPx);
+          ctx.globalAlpha = 1;
+        } else {
+          // 確定済み：保存された色で薄く背景（文字があるマスのみ）
+          const { char, colorId } = getCell(gx, gy);
+          if (char && colorId !== null) {
+            ctx.fillStyle = colorIdToHsl(colorId);
+            ctx.globalAlpha = 0.15;
+            ctx.fillRect(sx, sy, cellPx, cellPx);
+            ctx.globalAlpha = 1;
+          }
+        }
 
-        // カーソル背景
-        if (isCursorCell || isPending) {
-          ctx.fillStyle = '#f0f0f0';
+        // カーソル背景（少し濃いグレー）
+        if (isCursorCell) {
+          ctx.fillStyle = '#e8e8e8';
           ctx.fillRect(sx, sy, cellPx, cellPx);
         }
 
         // 文字
-        const char = isPending ? pendingChars[pendingOffset] : getCell(gx, gy);
+        let char, color;
+        if (isPending) {
+          char  = pendingChars[pendingOffset];
+          color = myColor();
+          ctx.globalAlpha = 0.5;
+        } else {
+          const cell = getCell(gx, gy);
+          char  = cell.char;
+          color = cell.colorId !== null ? colorIdToHsl(cell.colorId) : '#222';
+          ctx.globalAlpha = 1;
+        }
         if (char) {
-          ctx.fillStyle = isPending ? '#aaa' : '#222';
+          ctx.fillStyle = color;
           ctx.fillText(char, sx + cellPx / 2, sy + cellPx / 2);
         }
+        ctx.globalAlpha = 1;
 
         // カーソル下線
         if (isCursorCell) {
           ctx.fillStyle = '#444';
           const uw = cellPx * 0.5;
-          const ux = sx + (cellPx - uw) / 2;
-          const uy = sy + cellPx - cellPx * 0.15;
-          ctx.fillRect(ux, uy, uw, Math.max(1, cellPx * 0.06));
+          ctx.fillRect(sx + (cellPx - uw) / 2, sy + cellPx - cellPx * 0.15, uw, Math.max(1, cellPx * 0.06));
         }
       }
     }
@@ -259,7 +323,6 @@
     updateUI();
   }
 
-  // ---- UI ----
   function updateUI() {
     if (cursor) {
       uiEl.textContent = `${cursor.gx}, ${cursor.gy}`;
@@ -272,11 +335,10 @@
 
   // ---- IME位置 ----
   function moveIme() {
-    if (cursor === null) return;
+    if (!cursor) return;
     const pendingLen = [...pending].length;
     const activeGX = pendingLen > 0 ? Math.min(cursor.gx + pendingLen - 1, GRID_W - 1) : cursor.gx;
-    const activeGY = cursor.gy;
-    const { sx, sy } = gridToScreen(activeGX, activeGY);
+    const { sx, sy } = gridToScreen(activeGX, cursor.gy);
     const cellPx = CELL * scale;
     imeEl.style.left = (sx + cellPx + 4) + 'px';
     imeEl.style.top  = (sy + cellPx / 2 + 4) + 'px';
@@ -306,10 +368,10 @@
       const gy = cursor.gy;
       const cx = Math.floor(gx / CHUNK), cy = Math.floor(gy / CHUNK);
       const key = chunkKey(cx, cy);
-      const lx = gx % CHUNK, ly = gy % CHUNK;
-      const idx = ly * CHUNK + lx;
-      setCell(gx, gy, chars[j]);
-      updates[`map/chunks/${key}/flat/${idx}`] = chars[j];
+      const idx = (gy % CHUNK) * CHUNK + (gx % CHUNK);
+      setCellCache(gx, gy, chars[j], myColorId);
+      updates[`map/chunks/${key}/flat/${idx}`]   = chars[j];
+      updates[`map/chunks/${key}/colors/${idx}`] = myColorId !== null ? myColorId : 128;
     }
     await update(ref(db), updates);
     cursor.gx = Math.min(cursor.gx + chars.length, GRID_W - 1);
@@ -322,28 +384,7 @@
     if (fn) fn();
   }
 
-  // ---- イベント ----
-  canvas.addEventListener('click', (e) => {
-    // ドラッグ後のclickは無視
-    if (drag && drag.moved) return;
-    const { gx, gy } = screenToGrid(e.clientX, e.clientY);
-    if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
-      commitAndThen(() => setCursor(gx, gy, true));
-    }
-  });
-
-  document.addEventListener('click', (e) => {
-    if (e.target !== canvas) {
-      commitPending().then(() => {
-        cursor = null;
-        anchorCol = null;
-        draw();
-      });
-    } else if (cursor) {
-      imeEl.focus();
-    }
-  });
-
+  // ---- IMEイベント ----
   imeEl.addEventListener('input', () => {
     if (!cursor) return;
     pending = imeEl.value;
@@ -358,14 +399,10 @@
     if (e.key === 'Enter') {
       e.preventDefault();
       if (pending !== '') {
-        await commitPending();
-        draw();
+        await commitPending(); draw();
       } else {
-        // 改行：anchorColの列、一段下へ
         const nextGY = cursor.gy + 1;
-        if (nextGY < GRID_H && anchorCol !== null) {
-          setCursor(anchorCol, nextGY);
-        }
+        if (nextGY < GRID_H && anchorCol !== null) setCursor(anchorCol, nextGY);
       }
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
@@ -381,114 +418,97 @@
       await commitAndThen(() => setCursor(cursor.gx, cursor.gy - 1));
     } else if (e.key === 'Backspace' && pending === '') {
       e.preventDefault();
-      const gx = cursor.gx > 0 ? cursor.gx - 1 : 0;
+      const gx = Math.max(0, cursor.gx - 1);
       const gy = cursor.gy;
-      const cx = Math.floor(gx / CHUNK), cy = Math.floor(gy / CHUNK);
-      const key = chunkKey(cx, cy);
+      const key = chunkKey(Math.floor(gx / CHUNK), Math.floor(gy / CHUNK));
       const idx = (gy % CHUNK) * CHUNK + (gx % CHUNK);
-      setCell(gx, gy, '');
-      await update(ref(db), { [`map/chunks/${key}/flat/${idx}`]: '' });
+      setCellCache(gx, gy, '', null);
+      await update(ref(db), {
+        [`map/chunks/${key}/flat/${idx}`]:   '',
+        [`map/chunks/${key}/colors/${idx}`]: null,
+      });
       setCursor(gx, gy);
     } else if (e.key === 'Escape') {
-      pending = '';
-      imeEl.value = '';
-      cursor = null;
-      anchorCol = null;
-      imeEl.blur();
-      draw();
+      pending = ''; imeEl.value = '';
+      cursor = null; anchorCol = null;
+      imeEl.blur(); draw();
     }
   });
 
-  // ホイール：スクロール・拡大縮小
+  // ---- マウス・タッチ ----
+  let drag = null;
+
+  canvas.addEventListener('mousedown', (e) => {
+    drag = { startX: e.clientX, startY: e.clientY, startViewX: viewX, startViewY: viewY, moved: false };
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    viewX = Math.max(0, Math.min(GRID_W - 1, drag.startViewX - dx / (CELL * scale)));
+    viewY = Math.max(0, Math.min(GRID_H - 1, drag.startViewY - dy / (CELL * scale)));
+    syncSubscriptions(); moveIme(); draw();
+  });
+  window.addEventListener('mouseup', () => { drag = null; });
+
+  canvas.addEventListener('click', (e) => {
+    if (drag && drag.moved) return;
+    const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+    if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H)
+      commitAndThen(() => setCursor(gx, gy, true));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.target !== canvas && e.target !== colorBtn) {
+      commitPending().then(() => { cursor = null; anchorCol = null; draw(); });
+    } else if (cursor) { imeEl.focus(); }
+  });
+
+  let touch = null;
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    touch = { startX: t.clientX, startY: t.clientY, startViewX: viewX, startViewY: viewY, moved: false };
+  }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => {
+    if (!touch || e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const dx = t.clientX - touch.startX, dy = t.clientY - touch.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touch.moved = true;
+    viewX = Math.max(0, Math.min(GRID_W - 1, touch.startViewX - dx / (CELL * scale)));
+    viewY = Math.max(0, Math.min(GRID_H - 1, touch.startViewY - dy / (CELL * scale)));
+    syncSubscriptions(); moveIme(); draw();
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => {
+    if (touch && !touch.moved) {
+      const t = e.changedTouches[0];
+      const { gx, gy } = screenToGrid(t.clientX, t.clientY);
+      if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H)
+        commitAndThen(() => setCursor(gx, gy, true));
+    }
+    touch = null;
+  });
+
   window.addEventListener('wheel', (e) => {
     e.preventDefault();
-
     if (e.ctrlKey || e.metaKey) {
-      // 拡大縮小（マウス位置を中心に）
       const { gx: mx, gy: my } = screenToGrid(e.clientX, e.clientY);
       scale += e.deltaY < 0 ? SCALE_STEP : -SCALE_STEP;
       scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, scale));
       viewX = mx - e.clientX / (CELL * scale);
       viewY = my - e.clientY / (CELL * scale);
     } else if (e.shiftKey) {
-      // Shift：左右スクロール（deltaYで横移動）
       viewX += e.deltaY / (CELL * scale);
     } else {
-      // 通常：上下 + トラックパッドの横成分も反映
       viewY += e.deltaY / (CELL * scale);
       viewX += e.deltaX / (CELL * scale);
     }
-
     viewX = Math.max(0, Math.min(GRID_W - 1, viewX));
     viewY = Math.max(0, Math.min(GRID_H - 1, viewY));
-    syncSubscriptions();
-    moveIme();
-    draw();
+    syncSubscriptions(); moveIme(); draw();
   }, { passive: false });
-
-  // ---- ドラッグ（マウス）----
-  let drag = null;
-
-  canvas.addEventListener('mousedown', (e) => {
-    drag = {
-      startX: e.clientX, startY: e.clientY,
-      startViewX: viewX, startViewY: viewY,
-      moved: false,
-    };
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!drag) return;
-    const dx = e.clientX - drag.startX;
-    const dy = e.clientY - drag.startY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
-    if (!drag.moved) return;
-    viewX = Math.max(0, Math.min(GRID_W - 1, drag.startViewX - dx / (CELL * scale)));
-    viewY = Math.max(0, Math.min(GRID_H - 1, drag.startViewY - dy / (CELL * scale)));
-    syncSubscriptions();
-    moveIme();
-    draw();
-  });
-
-  window.addEventListener('mouseup', () => { drag = null; });
-
-  // ---- スワイプ（タッチ）----
-  let touch = null;
-
-  canvas.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    touch = {
-      startX: t.clientX, startY: t.clientY,
-      startViewX: viewX, startViewY: viewY,
-      moved: false,
-    };
-  }, { passive: true });
-
-  canvas.addEventListener('touchmove', (e) => {
-    if (!touch || e.touches.length !== 1) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    const dx = t.clientX - touch.startX;
-    const dy = t.clientY - touch.startY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touch.moved = true;
-    viewX = Math.max(0, Math.min(GRID_W - 1, touch.startViewX - dx / (CELL * scale)));
-    viewY = Math.max(0, Math.min(GRID_H - 1, touch.startViewY - dy / (CELL * scale)));
-    syncSubscriptions();
-    moveIme();
-    draw();
-  }, { passive: false });
-
-  canvas.addEventListener('touchend', (e) => {
-    if (touch && !touch.moved) {
-      const t = e.changedTouches[0];
-      const { gx, gy } = screenToGrid(t.clientX, t.clientY);
-      if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
-        commitAndThen(() => setCursor(gx, gy, true));
-      }
-    }
-    touch = null;
-  });
 
   // ---- 初期化 ----
   resize();
