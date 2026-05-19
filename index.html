@@ -69,10 +69,18 @@
   const WRAP = 15; // 折り返し幅
 
   // ---- カラーシステム ----
+  // 背景用（薄い色）
   function colorIdToHsl(id) {
     const hue   = (id % 64) * (360 / 64);
     const sat   = (Math.floor(id / 64) % 2 === 0) ? 55 : 80;
     const light = (Math.floor(id / 128) === 0)     ? 55 : 75;
+    return `hsl(${hue.toFixed(1)}, ${sat}%, ${light}%)`;
+  }
+  // 文字用（濃い色）
+  function colorIdToHslDark(id) {
+    const hue   = (id % 64) * (360 / 64);
+    const sat   = (Math.floor(id / 64) % 2 === 0) ? 70 : 90;
+    const light = (Math.floor(id / 128) === 0)     ? 28 : 38;
     return `hsl(${hue.toFixed(1)}, ${sat}%, ${light}%)`;
   }
 
@@ -299,12 +307,12 @@
         let char, color;
         if (isPending) {
           char  = pEntry.char;
-          color = myColor();
-          ctx.globalAlpha = 0.5;
+          color = myColorId !== null ? colorIdToHslDark(myColorId) : '#888';
+          ctx.globalAlpha = 0.6;
         } else {
           const cell = getCell(gx, gy);
           char  = cell.char;
-          color = cell.colorId !== null ? colorIdToHsl(cell.colorId) : '#222';
+          color = cell.colorId !== null ? colorIdToHslDark(cell.colorId) : '#222';
           ctx.globalAlpha = 1;
         }
         if (char) {
@@ -335,12 +343,13 @@
     }
   }
 
-  // ---- IME位置（折り返し考慮）----
+  // ---- IME位置（常にカーソルマスの右下）----
   function moveIme() {
     if (!cursor) return;
     const pendingLen = [...pending].length;
     let activeGX, activeGY;
     if (pendingLen > 0) {
+      // 仮入力中：折り返し後の最後の文字のマス
       const pos = wrappedPos(anchorCol ?? cursor.gx, cursor.gy, cursor.gx - (anchorCol ?? cursor.gx) + pendingLen - 1);
       activeGX = pos.gx; activeGY = pos.gy;
     } else {
@@ -544,7 +553,9 @@
       viewX = mx - e.clientX / (CELL * scale);
       viewY = my - e.clientY / (CELL * scale);
     } else if (e.shiftKey) {
-      viewX += e.deltaY / (CELL * scale);
+      // Mac は Shift+ホイールで deltaX に入る、Windows は deltaY に入る
+      const d = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+      viewX += d / (CELL * scale);
     } else {
       viewY += e.deltaY / (CELL * scale);
       viewX += e.deltaX / (CELL * scale);
