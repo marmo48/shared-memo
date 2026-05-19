@@ -324,6 +324,8 @@
 
   // ---- イベント ----
   canvas.addEventListener('click', (e) => {
+    // ドラッグ後のclickは無視
+    if (drag && drag.moved) return;
     const { gx, gy } = screenToGrid(e.clientX, e.clientY);
     if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
       commitAndThen(() => setCursor(gx, gy, true));
@@ -400,32 +402,93 @@
   // ホイール：スクロール・拡大縮小
   window.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const delta = e.deltaY;
 
     if (e.ctrlKey || e.metaKey) {
       // 拡大縮小（マウス位置を中心に）
       const { gx: mx, gy: my } = screenToGrid(e.clientX, e.clientY);
-      const prevScale = scale;
-      scale += delta < 0 ? SCALE_STEP : -SCALE_STEP;
+      scale += e.deltaY < 0 ? SCALE_STEP : -SCALE_STEP;
       scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, scale));
-      // スケール変化後にマウス下のグリッド座標を維持
       viewX = mx - e.clientX / (CELL * scale);
       viewY = my - e.clientY / (CELL * scale);
     } else if (e.shiftKey) {
-      // 左右スクロール
-      viewX += delta / (CELL * scale);
+      // Shift：左右スクロール（deltaYで横移動）
+      viewX += e.deltaY / (CELL * scale);
     } else {
-      // 上下スクロール
-      viewY += delta / (CELL * scale);
+      // 通常：上下 + トラックパッドの横成分も反映
+      viewY += e.deltaY / (CELL * scale);
+      viewX += e.deltaX / (CELL * scale);
     }
 
     viewX = Math.max(0, Math.min(GRID_W - 1, viewX));
     viewY = Math.max(0, Math.min(GRID_H - 1, viewY));
-
     syncSubscriptions();
     moveIme();
     draw();
   }, { passive: false });
+
+  // ---- ドラッグ（マウス）----
+  let drag = null;
+
+  canvas.addEventListener('mousedown', (e) => {
+    drag = {
+      startX: e.clientX, startY: e.clientY,
+      startViewX: viewX, startViewY: viewY,
+      moved: false,
+    };
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    viewX = Math.max(0, Math.min(GRID_W - 1, drag.startViewX - dx / (CELL * scale)));
+    viewY = Math.max(0, Math.min(GRID_H - 1, drag.startViewY - dy / (CELL * scale)));
+    syncSubscriptions();
+    moveIme();
+    draw();
+  });
+
+  window.addEventListener('mouseup', () => { drag = null; });
+
+  // ---- スワイプ（タッチ）----
+  let touch = null;
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    touch = {
+      startX: t.clientX, startY: t.clientY,
+      startViewX: viewX, startViewY: viewY,
+      moved: false,
+    };
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (!touch || e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const dx = t.clientX - touch.startX;
+    const dy = t.clientY - touch.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touch.moved = true;
+    viewX = Math.max(0, Math.min(GRID_W - 1, touch.startViewX - dx / (CELL * scale)));
+    viewY = Math.max(0, Math.min(GRID_H - 1, touch.startViewY - dy / (CELL * scale)));
+    syncSubscriptions();
+    moveIme();
+    draw();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    if (touch && !touch.moved) {
+      const t = e.changedTouches[0];
+      const { gx, gy } = screenToGrid(t.clientX, t.clientY);
+      if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
+        commitAndThen(() => setCursor(gx, gy, true));
+      }
+    }
+    touch = null;
+  });
 
   // ---- 初期化 ----
   resize();
