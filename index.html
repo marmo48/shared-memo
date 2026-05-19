@@ -104,9 +104,9 @@
     return myColorId === null ? '#aaa' : colorIdToHsl(myColorId);
   }
 
-  const colorBtn = document.getElementById('color-btn');
-  function updateColorBtn() { colorBtn.style.background = myColor(); }
-  updateColorBtn();
+  // const colorBtn = document.getElementById('color-btn');
+  // function updateColorBtn() { colorBtn.style.background = myColor(); }
+  // updateColorBtn();
 
   colorBtn.addEventListener('click', () => {
     myColorId = Math.floor(Math.random() * 256);
@@ -117,8 +117,8 @@
 
   // ---- 状態 ----
   let scale = 1.0;
-  let viewX = Math.floor(Math.random() * (GRID_W - 40));
-  let viewY = Math.floor(Math.random() * (GRID_H - 40));
+  let viewX = 500.0; // Math.floor(Math.random() * (GRID_W - 40));
+  let viewY = 500.0; // Math.floor(Math.random() * (GRID_H - 40));
   let cursor = null;
   let anchorCol = null;
   let pending = '';
